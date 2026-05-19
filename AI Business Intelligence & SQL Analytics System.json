@@ -1,0 +1,695 @@
+{
+  "name": "AI Business Intelligence & SQL Analytics System",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "sql-agent",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "868c69a3-4bec-4c23-b7e4-b0811022a88d",
+      "name": "SQL Agent Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        240,
+        408
+      ],
+      "webhookId": "0a34bf92-6992-47d9-832e-e2ba26aeeb2e"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are an expert SQL analyst. Convert the following business question into a valid PostgreSQL query.\n\nBusiness Question: {{ $json.body.question }}\n\nDatabase Schema:\n- users (id, email, created_at, plan_type)\n- sales (id, user_id, amount, created_at, status)\n- support_tickets (id, user_id, subject, status, priority, created_at, resolved_at)\n- transactions (id, user_id, amount, type, created_at)\n\nReturn ONLY the SQL query, no explanations.",
+        "options": {
+          "systemMessage": "You are a SQL expert. Generate valid PostgreSQL queries based on business questions. Always use proper date functions, aggregations, and joins. Return only the SQL query without markdown formatting or explanations."
+        }
+      },
+      "id": "d8fdd055-20ee-4aff-907f-5b548307cd7b",
+      "name": "SQL Query Generator",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        464,
+        408
+      ]
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-5-mini"
+        },
+        "builtInTools": {},
+        "options": {
+          "temperature": 0.2
+        }
+      },
+      "id": "b6a61a85-8ede-4dc7-86e5-057e4e063865",
+      "name": "OpenAI GPT-5",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        536,
+        632
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "eO3f6r25xfFF2JRF",
+          "name": "OpenAI account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "{{ $json.output }}",
+        "options": {
+          "queryBatching": "single"
+        }
+      },
+      "id": "10238376-4dfa-44ca-a79f-e7fd3830d298",
+      "name": "Execute SQL Query",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        816,
+        408
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "wYVPDTPZrOD0wK4L",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Analyze the following SQL query results and provide business insights.\n\nOriginal Question: {{ $(\"SQL Agent Webhook\").item.json.body.question }}\n\nSQL Query: {{ $(\"SQL Query Generator\").item.json.output }}\n\nResults: {{ JSON.stringify($json) }}\n\nProvide:\n1. Clear answer to the business question\n2. Key insights\n3. Recommendations",
+        "options": {
+          "systemMessage": "You are a business intelligence analyst. Provide clear, actionable insights from SQL query results. Focus on business impact and recommendations."
+        }
+      },
+      "id": "d1c4bf7f-a7b5-46ed-8960-2b02fc7c3850",
+      "name": "Analyze SQL Results",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        1040,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-5-mini"
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "id": "02d4888f-85de-457d-8072-b341b14e115e",
+      "name": "OpenAI Analysis Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        1112,
+        528
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "eO3f6r25xfFF2JRF",
+          "name": "OpenAI account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 8
+            }
+          ]
+        }
+      },
+      "id": "5032083a-a48f-48ae-8f19-5fec2b079b80",
+      "name": "Daily 8 AM Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        240,
+        1040
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "\n        WITH daily_metrics AS (\n          SELECT \n            CURRENT_DATE as metric_date,\n            COUNT(DISTINCT u.id) as total_users,\n            COUNT(DISTINCT CASE WHEN u.created_at::date = CURRENT_DATE THEN u.id END) as new_users_today,\n            COALESCE(SUM(CASE WHEN s.created_at::date = CURRENT_DATE AND s.status = 'completed' THEN s.amount END), 0) as revenue_today,\n            COALESCE(AVG(CASE WHEN s.created_at::date = CURRENT_DATE AND s.status = 'completed' THEN s.amount END), 0) as avg_transaction_value,\n            COUNT(CASE WHEN st.created_at::date = CURRENT_DATE THEN st.id END) as support_tickets_today,\n            COUNT(CASE WHEN st.created_at::date = CURRENT_DATE AND st.priority = 'high' THEN st.id END) as high_priority_tickets,\n            ROUND(\n              COUNT(CASE WHEN st.resolved_at IS NOT NULL AND st.created_at::date = CURRENT_DATE THEN st.id END)::numeric / \n              NULLIF(COUNT(CASE WHEN st.created_at::date = CURRENT_DATE THEN st.id END), 0) * 100, \n              2\n            ) as ticket_resolution_rate\n          FROM users u\n          LEFT JOIN sales s ON u.id = s.user_id\n          LEFT JOIN support_tickets st ON u.id = st.user_id\n        ),\n        historical_avg AS (\n          SELECT \n            AVG(daily_revenue) as avg_revenue_7d,\n            AVG(daily_users) as avg_users_7d,\n            AVG(daily_tickets) as avg_tickets_7d\n          FROM (\n            SELECT \n              DATE(s.created_at) as date,\n              COALESCE(SUM(CASE WHEN s.status = 'completed' THEN s.amount END), 0) as daily_revenue,\n              COUNT(DISTINCT u.id) as daily_users,\n              COUNT(st.id) as daily_tickets\n            FROM sales s\n            LEFT JOIN users u ON s.user_id = u.id\n            LEFT JOIN support_tickets st ON u.id = st.user_id\n            WHERE s.created_at >= CURRENT_DATE - INTERVAL '7 days'\n            GROUP BY DATE(s.created_at)\n          ) sub\n        )\n        SELECT \n          dm.*,\n          ha.avg_revenue_7d,\n          ha.avg_users_7d,\n          ha.avg_tickets_7d,\n          ROUND(((dm.revenue_today - ha.avg_revenue_7d) / NULLIF(ha.avg_revenue_7d, 0)) * 100, 2) as revenue_change_pct,\n          ROUND(((dm.support_tickets_today - ha.avg_tickets_7d) / NULLIF(ha.avg_tickets_7d, 0)) * 100, 2) as tickets_change_pct\n        FROM daily_metrics dm, historical_avg ha\n      ",
+        "options": {
+          "queryBatching": "single"
+        }
+      },
+      "id": "fd51b809-dc78-4eb1-8544-df72b84a4439",
+      "name": "Fetch Daily KPIs",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        464,
+        1040
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "wYVPDTPZrOD0wK4L",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst metrics = $input.first().json;\nconst anomalies = [];\n\n// Revenue anomaly detection (>20% change)\nif (Math.abs(metrics.revenue_change_pct) > 20) {\n  anomalies.push({\n    type: 'revenue',\n    severity: Math.abs(metrics.revenue_change_pct) > 40 ? 'critical' : 'warning',\n    metric: 'Daily Revenue',\n    current: metrics.revenue_today,\n    average: metrics.avg_revenue_7d,\n    change_pct: metrics.revenue_change_pct,\n    message: `Revenue ${metrics.revenue_change_pct > 0 ? 'increased' : 'decreased'} by ${Math.abs(metrics.revenue_change_pct)}%`\n  });\n}\n\n// Support ticket spike detection (>30% increase)\nif (metrics.tickets_change_pct > 30) {\n  anomalies.push({\n    type: 'support',\n    severity: metrics.tickets_change_pct > 50 ? 'critical' : 'warning',\n    metric: 'Support Tickets',\n    current: metrics.support_tickets_today,\n    average: metrics.avg_tickets_7d,\n    change_pct: metrics.tickets_change_pct,\n    message: `Support tickets increased by ${metrics.tickets_change_pct}%`\n  });\n}\n\n// High priority ticket alert\nif (metrics.high_priority_tickets > 5) {\n  anomalies.push({\n    type: 'support',\n    severity: 'warning',\n    metric: 'High Priority Tickets',\n    current: metrics.high_priority_tickets,\n    message: `${metrics.high_priority_tickets} high priority tickets need attention`\n  });\n}\n\n// Low resolution rate\nif (metrics.ticket_resolution_rate < 70) {\n  anomalies.push({\n    type: 'support',\n    severity: 'warning',\n    metric: 'Ticket Resolution Rate',\n    current: metrics.ticket_resolution_rate,\n    message: `Resolution rate dropped to ${metrics.ticket_resolution_rate}%`\n  });\n}\n\nreturn anomalies.length > 0 \n  ? anomalies.map(a => ({ json: { ...metrics, anomaly: a, has_anomalies: true } }))\n  : [{ json: { ...metrics, has_anomalies: false } }];\n      "
+      },
+      "id": "284f0f52-70d5-47ef-a698-a95903540146",
+      "name": "Detect Anomalies",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        688,
+        1040
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.has_anomalies }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "c303803f-b7b7-44fa-88fb-64e4d4b167c0",
+      "name": "Has Anomalies?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        912,
+        1040
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are an AI Business Intelligence Analyst.\n\nAnalyze this KPI/anomaly data:\n\n{{ JSON.stringify($input.all()) }}\n\nReturn in this format:\n\nSummary:\nAnomalies:\nPossible Causes:\nRecommended Action:\nTelegram Alert:",
+        "options": {
+          "systemMessage": "You are an operational intelligence analyst specializing in anomaly detection and business metrics. Provide actionable insights with urgency appropriate to the severity level."
+        }
+      },
+      "id": "7156f4bb-15c7-40b1-b37d-e220ef3b3e4e",
+      "name": "AI Anomaly Analysis",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        1136,
+        1136
+      ]
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-5",
+          "mode": "list",
+          "cachedResultName": "gpt-5"
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "id": "1d61553f-07d2-425c-8570-c0a198035a0e",
+      "name": "OpenAI Anomaly Analyzer",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        1208,
+        1360
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "eO3f6r25xfFF2JRF",
+          "name": "OpenAI account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Generate a concise daily business summary:\n\nMetrics:\n- Total Users: {{ $json.total_users }}\n- New Users Today: {{ $json.new_users_today }}\n- Revenue Today: ${{ $json.revenue_today }}\n- Avg Transaction: ${{ $json.avg_transaction_value }}\n- Support Tickets: {{ $json.support_tickets_today }}\n- High Priority: {{ $json.high_priority_tickets }}\n- Resolution Rate: {{ $json.ticket_resolution_rate }}%\n- Revenue Change: {{ $json.revenue_change_pct }}%\n\nProvide a brief executive summary with key highlights.",
+        "options": {
+          "systemMessage": "You are a business analyst creating daily executive summaries. Be concise, highlight key metrics, and note any trends."
+        }
+      },
+      "id": "c62ee2df-857c-4292-b9c5-e73ba5528c5c",
+      "name": "Generate Daily Summary",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        1136,
+        736
+      ]
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-5-mini"
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "id": "4dff5019-de71-44ba-889e-2cddee948910",
+      "name": "OpenAI Summary Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        1208,
+        960
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "eO3f6r25xfFF2JRF",
+          "name": "OpenAI account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "brightnetcode@gmail.com",
+        "subject": "=Daily Business Intelligence Report - {{ $now.toFormat(\"MMM dd, yyyy\") }}",
+        "message": "=<h2>Daily Business Intelligence Report</h2>\n<p><strong>Date:</strong> {{ $now.toFormat(\"MMMM dd, yyyy\") }}</p>\n\n<h3>Executive Summary</h3>\n<pre>{{ $(\"Generate Daily Summary\").item.json.output }}</pre>\n\n<h3>Key Metrics</h3>\n<table border=\"1\" cellpadding=\"8\" style=\"border-collapse: collapse;\">\n<tr><th>Metric</th><th>Value</th></tr>\n<tr><td>Total Users</td><td>{{ $(\"Detect Anomalies\").item.json.total_users }}</td></tr>\n<tr><td>New Users Today</td><td>{{ $(\"Detect Anomalies\").item.json.new_users_today }}</td></tr>\n<tr><td>Revenue Today</td><td>${{ $(\"Detect Anomalies\").item.json.revenue_today }}</td></tr>\n<tr><td>Avg Transaction</td><td>${{ $(\"Detect Anomalies\").item.json.avg_transaction_value }}</td></tr>\n<tr><td>Support Tickets</td><td>{{ $(\"Detect Anomalies\").item.json.support_tickets_today }}</td></tr>\n<tr><td>Resolution Rate</td><td>{{ $(\"Detect Anomalies\").item.json.ticket_resolution_rate }}%</td></tr>\n</table>\n\n<p><em>Generated automatically by n8n AI Analytics System</em></p>",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "59ffe0bb-0743-49db-b278-d9ac86b87d4c",
+      "name": "Send Email Report",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        1488,
+        840
+      ],
+      "webhookId": "e3d6981d-f0de-4fbe-bbda-ad35101a9a7a",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "VZEhLeaXx57k12Ww",
+          "name": "Gmail OAuth2 API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 6
+            }
+          ]
+        }
+      },
+      "id": "b4dc1efa-e1e0-4254-9fbe-b849e8ae898a",
+      "name": "Every 6 Hours",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        240,
+        1672
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "\n        SELECT \n          st.id,\n          st.subject,\n          st.status,\n          st.priority,\n          st.created_at,\n          st.resolved_at,\n          u.email as user_email,\n          u.plan_type,\n          EXTRACT(EPOCH FROM (COALESCE(st.resolved_at, NOW()) - st.created_at))/3600 as resolution_hours\n        FROM support_tickets st\n        JOIN users u ON st.user_id = u.id\n        WHERE st.created_at >= NOW() - INTERVAL '6 hours'\n        ORDER BY st.created_at DESC\n        LIMIT 100\n      ",
+        "options": {
+          "queryBatching": "single"
+        }
+      },
+      "id": "b6b79b35-a065-4008-a2d4-9e57e89585df",
+      "name": "Fetch Support Tickets",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        464,
+        1672
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "wYVPDTPZrOD0wK4L",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "aggregate": "aggregateAllItemData",
+        "destinationFieldName": "tickets",
+        "options": {}
+      },
+      "id": "87f985e6-1b31-4416-bd50-3c481563fba5",
+      "name": "Aggregate Ticket Data",
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [
+        688,
+        1672
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Analyze these support tickets and provide operational intelligence:\n\n{{ JSON.stringify($json.tickets, null, 2) }}\n\nProvide:\n1. Common issue categories\n2. Recurring problems\n3. Priority distribution\n4. Customer pain points\n5. Recommended actions for support team\n6. Product improvement suggestions",
+        "options": {
+          "systemMessage": "You are a customer support intelligence analyst. Identify patterns, categorize issues, and provide actionable recommendations to improve support operations and product quality."
+        }
+      },
+      "id": "cee15e4c-fba2-49ae-a931-374ab6c4f00b",
+      "name": "AI Ticket Intelligence",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        912,
+        1672
+      ]
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-5-mini"
+        },
+        "builtInTools": {},
+        "options": {
+          "temperature": 0.2
+        }
+      },
+      "id": "8191a879-b0d0-403e-aae5-523ff88744c7",
+      "name": "OpenAI Ticket Analyzer",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        984,
+        1896
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "eO3f6r25xfFF2JRF",
+          "name": "OpenAI account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "5995833703",
+        "text": "AI Operational Intelligence Alert",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1488,
+        1240
+      ],
+      "id": "be19a209-a85c-431e-b3f0-d5c09cd04aac",
+      "name": "Send a text message",
+      "webhookId": "a6b0e910-b0f0-4a38-9d2d-af21c86a78d0",
+      "credentials": {
+        "telegramApi": {
+          "id": "M9GfHuRmP3PApGnZ",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "878250084",
+        "text": "AI Operational Intelligence Alert",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1264,
+        1672
+      ],
+      "id": "8b4337fc-1d51-4eda-b56d-11a2efdff26a",
+      "name": "Send a text message1",
+      "webhookId": "a6b0e910-b0f0-4a38-9d2d-af21c86a78d0",
+      "credentials": {
+        "telegramApi": {
+          "id": "M9GfHuRmP3PApGnZ",
+          "name": "Telegram account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "SQL Agent Webhook": {
+      "main": [
+        [
+          {
+            "node": "SQL Query Generator",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SQL Query Generator": {
+      "main": [
+        [
+          {
+            "node": "Execute SQL Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI GPT-5": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "SQL Query Generator",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute SQL Query": {
+      "main": [
+        [
+          {
+            "node": "Analyze SQL Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Analysis Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Analyze SQL Results",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Daily 8 AM Trigger": {
+      "main": [
+        [
+          {
+            "node": "Fetch Daily KPIs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Daily KPIs": {
+      "main": [
+        [
+          {
+            "node": "Detect Anomalies",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Detect Anomalies": {
+      "main": [
+        [
+          {
+            "node": "Has Anomalies?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Anomalies?": {
+      "main": [
+        [
+          {
+            "node": "AI Anomaly Analysis",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Generate Daily Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Anomaly Analysis": {
+      "main": [
+        [
+          {
+            "node": "Send a text message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Anomaly Analyzer": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Anomaly Analysis",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Daily Summary": {
+      "main": [
+        [
+          {
+            "node": "Send Email Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Summary Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Generate Daily Summary",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Every 6 Hours": {
+      "main": [
+        [
+          {
+            "node": "Fetch Support Tickets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Support Tickets": {
+      "main": [
+        [
+          {
+            "node": "Aggregate Ticket Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate Ticket Data": {
+      "main": [
+        [
+          {
+            "node": "AI Ticket Intelligence",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Ticket Intelligence": {
+      "main": [
+        [
+          {
+            "node": "Send a text message1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Ticket Analyzer": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Ticket Intelligence",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "0dad13e4-0fff-4cb6-83eb-1c694badd9aa",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "57f272ba4e334b6881cc48ae2f28c4ddb6543bb4e4e7087f8011493f3f9c2e22"
+  },
+  "id": "z0UNcx7uow51HWXz",
+  "tags": []
+}
